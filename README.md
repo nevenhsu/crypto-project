@@ -1,5 +1,14 @@
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+# Usage
+
+\*Must have following resources installed
+[Docker](https://www.docker.com/)
+[Truffle](https://www.trufflesuite.com/truffle)
+[Ganache](https://www.trufflesuite.com/ganache)
+
+To install solidity compiler, use `docker run ethereum/solc:0.6.1 --help` 
+
 ## Available Scripts
 
 In the project directory, you can run:
@@ -16,6 +25,10 @@ You will also see any lint errors in the console.
 
 Launches the test runner in the interactive watch mode.<br />
 See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+
+### `truffle test`
+
+Launches the test runner for solidity files.
 
 ### `npm run build`
 

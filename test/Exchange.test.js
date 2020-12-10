@@ -105,6 +105,16 @@ contract('Exchange', (accounts) => {
                 balance.toString().should.be.equal('0')
             })
         })
+
+        describe('failure', () => {
+            it('rejects with insufficient Ether', async () => {
+                await exchange
+                    .withdrawEther(ether(1), {
+                        from: accounts[2],
+                    })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
+        })
     })
 
     describe('depositing token', () => {
@@ -169,6 +179,152 @@ contract('Exchange', (accounts) => {
                         from: accounts[2],
                     })
                     .should.be.rejectedWith(EVENT_REVERT)
+            })
+        })
+    })
+
+    describe('withdrawing token', () => {
+        describe('success', () => {
+            let result
+            let amount = tokens(10)
+
+            beforeEach(async () => {
+                await token.transfer(accounts[2], amount, { from: accounts[0] })
+                await token.approve(exchange.address, amount, {
+                    from: accounts[2],
+                })
+                await exchange.deposit(token.address, amount, {
+                    from: accounts[2],
+                })
+                result = await exchange.withdraw(token.address, amount, {
+                    from: accounts[2],
+                })
+            })
+
+            it('withdraws tokens', async () => {
+                const balance = await exchange.tokens(
+                    token.address,
+                    accounts[2]
+                )
+                balance.toString().should.equal('0')
+            })
+
+            it('emits Withdraw event', () => {
+                const [log] = result.logs
+                const { event, args } = log
+                event.should.equal('Withdraw')
+                const {
+                    token: tokenAddress,
+                    sender,
+                    amount: ether,
+                    balance,
+                } = args
+                tokenAddress.should.be.equal(token.address)
+                sender.should.be.equal(accounts[2])
+                ether.toString().should.be.equal(amount.toString())
+                balance.toString().should.be.equal('0')
+            })
+        })
+        describe('failure', () => {
+            it('rejects with withdrawing Ether', async () => {
+                await exchange
+                    .withdraw(ETHER_ADDRESS, tokens(1), { from: accounts[2] })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
+
+            it('rejects with insufficient tokens', async () => {
+                await exchange
+                    .withdraw(token.address, tokens(1), { from: accounts[2] })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
+        })
+    })
+
+    describe('checking token balance', () => {
+        const amount = ether(1)
+        beforeEach(async () => {
+            await exchange.depositEther({ from: accounts[2], value: amount })
+        })
+        it('checks ether balance', async () => {
+            const balance = await exchange.balanceOf(ETHER_ADDRESS, accounts[2])
+            balance.toString().should.equal(amount.toString())
+        })
+    })
+
+    describe('making orders', () => {
+        let result
+        let amount = tokens(1)
+        beforeEach(async () => {
+            result = await exchange.makeOrder(
+                token.address,
+                amount,
+                ETHER_ADDRESS,
+                amount,
+                { from: accounts[0] }
+            )
+        })
+        it('tracks the newly order', async () => {
+            const order = await exchange.orders(1)
+            const { id } = order
+            id.toString().should.equal('1')
+        })
+        it('emits Order event', () => {
+            const [log] = result.logs
+            const { event, args } = log
+            event.should.equal('Order')
+            const {
+                id,
+                user,
+                tokenGet,
+                amountGet,
+                tokenGive,
+                amountGive,
+                timestamp,
+            } = args
+            id.toString().should.be.equal('1')
+            user.should.be.equal(accounts[0])
+            tokenGet.toString().should.be.equal(token.address)
+            amountGet.toString().should.be.equal(amount.toString())
+            tokenGive.toString().should.be.equal(ETHER_ADDRESS)
+            amountGive.toString().should.be.equal(amount.toString())
+        })
+    })
+    describe('cancelling orders', () => {
+        let orderId
+        let result
+        let amount = tokens(1)
+
+        beforeEach(async () => {
+            const orderResult = await exchange.makeOrder(
+                token.address,
+                amount,
+                ETHER_ADDRESS,
+                amount,
+                { from: accounts[0] }
+            )
+
+            orderId = orderResult.logs[0].args.id.toString()
+
+            result = await exchange.cancelOrder(orderId, {
+                from: accounts[0],
+            })
+        })
+
+        describe('success', () => {
+            it('cancels order', async () => {
+                const cancelled = await exchange.orderCancelled(orderId, {
+                    from: accounts[0],
+                })
+                cancelled.should.equal(true)
+            })
+
+            it('emits cancel event', async () => {
+                const [log] = result.logs
+                const { event, args } = log
+                event.should.equal('Cancel')
+                const { id, user } = args
+                id.toString().should.be.equal(orderId)
+                user.should.be.equal(accounts[0])
             })
         })
     })
