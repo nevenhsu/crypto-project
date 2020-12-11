@@ -1,7 +1,7 @@
 import { ether, tokens, EVENT_REVERT, ETHER_ADDRESS } from './helper'
 
-const Token = artifacts.require('./Token')
-const Exchange = artifacts.require('./Exchange')
+const Token = artifacts.require('Token')
+const Exchange = artifacts.require('Exchange')
 
 require('chai').use(require('chai-as-promised')).should()
 
@@ -254,39 +254,56 @@ contract('Exchange', (accounts) => {
     describe('making orders', () => {
         let result
         let amount = tokens(1)
-        beforeEach(async () => {
-            result = await exchange.makeOrder(
-                token.address,
-                amount,
-                ETHER_ADDRESS,
-                amount,
-                { from: accounts[0] }
-            )
+
+        describe('success', () => {
+            beforeEach(async () => {
+                await exchange.depositEther({
+                    from: accounts[0],
+                    value: amount,
+                })
+                result = await exchange.makeOrder(
+                    token.address,
+                    amount,
+                    ETHER_ADDRESS,
+                    amount,
+                    { from: accounts[0] }
+                )
+            })
+            it('tracks the newly order', async () => {
+                const order = await exchange.orders(1)
+                const { id } = order
+                id.toString().should.equal('1')
+            })
+            it('emits Order event', () => {
+                const [log] = result.logs
+                const { event, args } = log
+                event.should.equal('Order')
+                const {
+                    id,
+                    user,
+                    tokenGet,
+                    amountGet,
+                    tokenGive,
+                    amountGive,
+                    timestamp,
+                } = args
+                id.toString().should.be.equal('1')
+                user.should.be.equal(accounts[0])
+                tokenGet.toString().should.be.equal(token.address)
+                amountGet.toString().should.be.equal(amount.toString())
+                tokenGive.toString().should.be.equal(ETHER_ADDRESS)
+                amountGive.toString().should.be.equal(amount.toString())
+            })
         })
-        it('tracks the newly order', async () => {
-            const order = await exchange.orders(1)
-            const { id } = order
-            id.toString().should.equal('1')
-        })
-        it('emits Order event', () => {
-            const [log] = result.logs
-            const { event, args } = log
-            event.should.equal('Order')
-            const {
-                id,
-                user,
-                tokenGet,
-                amountGet,
-                tokenGive,
-                amountGive,
-                timestamp,
-            } = args
-            id.toString().should.be.equal('1')
-            user.should.be.equal(accounts[0])
-            tokenGet.toString().should.be.equal(token.address)
-            amountGet.toString().should.be.equal(amount.toString())
-            tokenGive.toString().should.be.equal(ETHER_ADDRESS)
-            amountGive.toString().should.be.equal(amount.toString())
+
+        describe('failure', () => {
+            it('rejects with no insufficient token', async () => {
+                await exchange
+                    .makeOrder(token.address, amount, ETHER_ADDRESS, amount, {
+                        from: accounts[3],
+                    })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
         })
     })
     describe('cancelling orders', () => {
@@ -295,6 +312,10 @@ contract('Exchange', (accounts) => {
         let amount = tokens(1)
 
         beforeEach(async () => {
+            await exchange.depositEther({
+                from: accounts[0],
+                value: amount,
+            })
             const orderResult = await exchange.makeOrder(
                 token.address,
                 amount,
@@ -304,13 +325,14 @@ contract('Exchange', (accounts) => {
             )
 
             orderId = orderResult.logs[0].args.id.toString()
-
-            result = await exchange.cancelOrder(orderId, {
-                from: accounts[0],
-            })
         })
 
         describe('success', () => {
+            beforeEach(async () => {
+                result = await exchange.cancelOrder(orderId, {
+                    from: accounts[0],
+                })
+            })
             it('cancels order', async () => {
                 const cancelled = await exchange.orderCancelled(orderId, {
                     from: accounts[0],
@@ -325,6 +347,114 @@ contract('Exchange', (accounts) => {
                 const { id, user } = args
                 id.toString().should.be.equal(orderId)
                 user.should.be.equal(accounts[0])
+            })
+        })
+
+        describe('failure', () => {
+            it('rejects with invalid user', async () => {
+                await exchange
+                    .cancelOrder(orderId, {
+                        from: accounts[1],
+                    })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
+        })
+    })
+
+    describe('trading orders', () => {
+        let orderId
+        let result
+        let amount = ether(1)
+        const maker = accounts[5]
+        const taker = accounts[6]
+
+        beforeEach(async () => {
+            await token.transfer(maker, amount, {
+                from: accounts[0],
+            })
+
+            await token.approve(exchange.address, amount, {
+                from: maker,
+            })
+
+            await exchange.deposit(token.address, amount, {
+                from: maker,
+            })
+
+            await exchange.makeOrder(
+                ETHER_ADDRESS,
+                amount,
+                token.address,
+                amount,
+                { from: maker }
+            )
+
+            orderId = await exchange.orderCount()
+        })
+
+        describe('success', () => {
+            beforeEach(async () => {
+                await exchange.depositEther({
+                    from: taker,
+                    value: ether(1 * (1 + feePercent / 100)),
+                })
+                result = await exchange.fillOrder(orderId, { from: taker })
+            })
+
+            it('trades ether for token', async () => {
+                let balance
+                balance = await exchange.balanceOf(token.address, taker)
+                balance.toString().should.be.equal(amount.toString())
+                balance = await exchange.balanceOf(ETHER_ADDRESS, taker)
+                balance.toString().should.be.equal('0')
+                balance = await exchange.balanceOf(token.address, maker)
+                balance.toString().should.be.equal('0')
+                balance = await exchange.balanceOf(ETHER_ADDRESS, maker)
+                balance.toString().should.be.equal(amount.toString())
+            })
+            it('emits Trade event', async () => {
+                const [log] = result.logs
+                const { event, args } = log
+                event.should.equal('Trade')
+                const {
+                    id,
+                    user,
+                    tokenGet,
+                    amountGet,
+                    tokenGive,
+                    amountGive,
+                    userFill,
+                } = args
+                id.toString().should.be.equal(orderId.toString())
+                user.should.be.equal(maker)
+                userFill.should.be.equal(taker)
+                tokenGet.should.be.equal(ETHER_ADDRESS)
+                amountGet.toString().should.equal(amount.toString())
+                tokenGive.should.be.equal(token.address)
+                amountGive.toString().should.equal(amount.toString())
+            })
+        })
+
+        describe('failure', () => {
+            it('reject with invalid id', async () => {
+                await exchange
+                    .fillOrder(999, { from: taker })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
+            it('reject with insufficient fee', async () => {
+                await exchange
+                    .fillOrder(orderId, { from: taker })
+                    .should.be.rejectedWith(EVENT_REVERT)
+            })
+            it('reject with canceled order', async () => {
+                await exchange.cancelOrder(orderId, { from: maker })
+                await exchange.depositEther({
+                    from: taker,
+                    value: ether(1 * (1 + feePercent / 100)),
+                })
+                await exchange
+                    .fillOrder(orderId, { from: taker })
+                    .should.be.rejectedWith(EVENT_REVERT)
             })
         })
     })

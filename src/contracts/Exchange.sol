@@ -15,8 +15,8 @@ import './Token.sol';
 // [X] Check balances
 // [X] Make order
 // [X] Cancel order
-// [ ] Fill order
-// [ ] Charge fees
+// [X] Fill order
+// [X] Charge fees
 
 contract Exchange {
     using SafeMath for uint256;
@@ -29,6 +29,7 @@ contract Exchange {
     mapping(address => mapping(address => uint256)) public tokens;
     mapping(uint256 => _Order) public orders;
     mapping(uint256 => bool) public orderCancelled;
+    mapping(uint256 => bool) public orderFilled;
 
     struct _Order {
         uint256 id;
@@ -71,6 +72,17 @@ contract Exchange {
         uint256 amountGet,
         address tokenGive,
         uint256 amountGive,
+        uint256 timestamp
+    );
+
+    event Trade(
+        uint256 id,
+        address user,
+        address tokenGet,
+        uint256 amountGet,
+        address tokenGive,
+        uint256 amountGive,
+        address userFill,
         uint256 timestamp
     );
 
@@ -126,6 +138,8 @@ contract Exchange {
         address _tokenGive,
         uint256 _amountGive
     ) public {
+        require(tokens[_tokenGive][msg.sender] >= _amountGive);
+
         orderCount = orderCount.add(1);
         orders[orderCount] = _Order(
             orderCount,
@@ -161,6 +175,63 @@ contract Exchange {
             order.tokenGive,
             order.amountGive,
             order.timestamp
+        );
+    }
+
+    function fillOrder(uint256 _id) public {
+        _Order storage _order = orders[_id];
+
+        require(_order.id == _id);
+        require(!orderFilled[_id]);
+        require(!orderCancelled[_id]);
+
+        _trade(
+            _order.id,
+            _order.user,
+            _order.tokenGet,
+            _order.amountGet,
+            _order.tokenGive,
+            _order.amountGive
+        );
+
+        orderFilled[_id] = true;
+    }
+
+    function _trade(
+        uint256 _id,
+        address _user,
+        address _tokenGet,
+        uint256 _amountGet,
+        address _tokenGive,
+        uint256 _amountGive
+    ) internal {
+        uint256 feeAmount = _amountGet.mul(feePercent).div(100);
+        uint256 requiredAmount = _amountGet.add(feeAmount);
+
+        require(tokens[_tokenGet][msg.sender] >= requiredAmount);
+
+        tokens[_tokenGet][msg.sender] = tokens[_tokenGet][msg.sender].sub(
+            requiredAmount
+        );
+        tokens[_tokenGet][_user] = tokens[_tokenGet][_user].add(_amountGet);
+        tokens[_tokenGive][_user] = tokens[_tokenGive][_user].sub(_amountGive);
+        tokens[_tokenGive][msg.sender] = tokens[_tokenGive][msg.sender].add(
+            _amountGive
+        );
+
+        tokens[_tokenGet][feeAccount] = tokens[_tokenGet][feeAccount].add(
+            feeAmount
+        );
+
+        emit Trade(
+            _id,
+            _user,
+            _tokenGet,
+            _amountGet,
+            _tokenGive,
+            _amountGive,
+            msg.sender,
+            now
         );
     }
 }
